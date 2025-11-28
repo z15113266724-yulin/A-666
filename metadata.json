@@ -1,0 +1,5 @@
+{
+  "name": "AmazonGen - Product Image Suite",
+  "description": "Generate professional Amazon listing images from a single product photo using Gemini AI.",
+  "requestFramePermissions": []
+}
