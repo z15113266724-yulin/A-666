@@ -1,33 +1,39 @@
 import React, { useState } from 'react';
-import { Upload, Image as ImageIcon, X } from 'lucide-react';
+import { Upload, X, Plus } from 'lucide-react';
 
 interface ImageUploaderProps {
-  onImageSelected: (base64: string) => void;
+  onImagesSelected: (base64s: string[]) => void;
   onClear: () => void;
-  selectedImage: string | null;
+  selectedImages: string[];
 }
 
-export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onClear, selectedImage }) => {
+export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImagesSelected, onClear, selectedImages }) => {
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processFile(file);
-  };
+  const processFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
 
-  const processFile = (file: File) => {
-    if (!file.type.startsWith('image/')) return;
-    
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      // Remove data URL prefix for API if needed, but display needs it. 
-      // We pass the full string, service will handle stripping if necessary.
-      // For Gemini API, we usually need the base64 part split.
-      const base64Clean = result.split(',')[1]; 
-      onImageSelected(base64Clean); 
-    };
-    reader.readAsDataURL(file);
+    const newImages: string[] = [];
+    let processedCount = 0;
+
+    Array.from(files).forEach(file => {
+      if (!file.type.startsWith('image/')) return;
+      
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        const base64Clean = result.split(',')[1];
+        newImages.push(base64Clean);
+        processedCount++;
+        
+        if (processedCount === files.length) {
+          // Combine with existing images if needed, or just replace? 
+          // Use case: appending.
+          onImagesSelected([...selectedImages, ...newImages]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -43,28 +49,72 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, o
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    processFiles(e.dataTransfer.files);
   };
 
-  if (selectedImage) {
+  const removeImage = (index: number) => {
+    const newImages = selectedImages.filter((_, i) => i !== index);
+    if (newImages.length === 0) {
+        onClear();
+    } else {
+        // We need to update the parent state manually effectively
+        // Since onImagesSelected usually expects to add, we might need a better way to set state directly
+        // But for now, let's assume the parent handles the "set" logic if we pass the new array
+        // Re-using onImagesSelected to SET the full array is a bit hacky based on name, but works for React state setters.
+        // Let's modify App.tsx to treat this callback as "setImages".
+        // Actually, let's just emit the new full array.
+        onImagesSelected(newImages); // NOTE: This requires App.tsx to SET state, not append.
+    }
+  };
+
+  if (selectedImages.length > 0) {
     return (
-      <div className="relative group rounded-xl overflow-hidden border-2 border-blue-500 shadow-md bg-white">
-        <img 
-          src={`data:image/jpeg;base64,${selectedImage}`} 
-          alt="Product Source" 
-          className="w-full h-64 object-contain p-4"
-        />
-        <div className="absolute top-2 right-2">
-           <button 
-            onClick={onClear}
-            className="bg-white/90 p-2 rounded-full shadow-lg hover:bg-red-50 text-red-500 transition-colors"
-           >
-             <X size={20} />
-           </button>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {selectedImages.map((img, idx) => (
+                <div key={idx} className="relative group rounded-xl overflow-hidden border border-gray-200 shadow-sm bg-white aspect-square">
+                    <img 
+                    src={`data:image/jpeg;base64,${img}`} 
+                    alt={`Source ${idx}`} 
+                    className="w-full h-full object-contain p-2"
+                    />
+                    <div className="absolute top-1 right-1">
+                        <button 
+                            onClick={() => removeImage(idx)}
+                            className="bg-white/90 p-1.5 rounded-full shadow-md hover:bg-red-50 text-red-500 transition-colors"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                </div>
+            ))}
+            
+            {/* Add More Button */}
+            {selectedImages.length < 5 && (
+                 <label className="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors aspect-square">
+                    <input 
+                        type="file" 
+                        accept="image/*" 
+                        multiple
+                        onChange={(e) => {
+                            // Helper to append
+                            // We need to pass ONLY new files to process, but processFiles merges them.
+                            // Actually processFiles merges with selectedImages prop.
+                            // But here we want to process NEW files and merge them.
+                            // The processFiles logic: onImagesSelected([...selectedImages, ...newImages])
+                            // So if we pass new files to it, it will append them to CURRENT selectedImages.
+                            processFiles(e.target.files);
+                        }}
+                        className="hidden"
+                    />
+                    <Plus className="w-8 h-8 text-gray-400" />
+                    <span className="text-xs text-gray-500 mt-1">Add Image</span>
+                 </label>
+            )}
         </div>
-        <div className="absolute bottom-0 left-0 right-0 bg-blue-600/90 text-white p-2 text-center text-sm font-medium">
-          Source Product Image
+        
+        <div className="text-center">
+            <button onClick={onClear} className="text-xs text-red-500 hover:underline">Clear All Images</button>
         </div>
       </div>
     );
@@ -81,15 +131,24 @@ export const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, o
       <input 
         type="file" 
         accept="image/*" 
-        onChange={handleFileChange}
+        multiple
+        onChange={(e) => {
+            // Initial upload, selectedImages is empty.
+            // processFiles appends new images to empty array.
+            // onImagesSelected(newImages)
+            // App.tsx needs to handle this "set".
+            // Since processFiles uses selectedImages prop, if it is empty, it works fine.
+            processFiles(e.target.files)
+        }}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
       />
       <div className="bg-blue-100 p-4 rounded-full mb-4">
         <Upload className="w-8 h-8 text-blue-600" />
       </div>
-      <h3 className="text-lg font-semibold text-gray-800">Upload Product Image</h3>
+      <h3 className="text-lg font-semibold text-gray-800">Upload Product Images</h3>
       <p className="text-sm text-gray-500 mt-2 max-w-xs">
-        Drag & drop or click to upload. <br/> Use a clear image with good lighting.
+        Drag & drop or click to upload multiple images.<br/>
+        <span className="text-blue-600 text-xs font-medium bg-blue-50 px-2 py-0.5 rounded-full mt-1 inline-block">Supports Group Shots</span>
       </p>
     </div>
   );

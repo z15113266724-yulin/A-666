@@ -10,3 +10,8 @@ export const ASPECT_RATIOS: { value: AspectRatio; label: string }[] = [
 
 export const MAX_IMAGES = 8;
 export const MIN_IMAGES = 1;
+
+export const TABS = {
+  STUDIO: 'studio',
+  HISTORY: 'history'
+};
