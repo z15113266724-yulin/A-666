@@ -4,7 +4,7 @@ import { Button } from './components/Button';
 import { analyzeProductImage, generateScenarioImage } from './services/geminiService';
 import { GeneratedImage, GenerationSettings, ProductAnalysis, AppTab } from './types';
 import { ASPECT_RATIOS, MAX_IMAGES, MIN_IMAGES, TABS } from './constants';
-import { Sparkles, Layers, Download, Image as ImageIcon, CheckCircle, RefreshCw, ShoppingBag, Maximize2, X, ZoomIn, History, Clock } from 'lucide-react';
+import { Sparkles, Layers, Download, Image as ImageIcon, CheckCircle, RefreshCw, ShoppingBag, Maximize2, X, ZoomIn, History, Clock, Command } from 'lucide-react';
 
 export default function App() {
   // State
@@ -14,6 +14,9 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   
+  // Custom Instruction
+  const [customInstruction, setCustomInstruction] = useState("");
+
   // Current Session Images
   const [currentSessionImages, setCurrentSessionImages] = useState<GeneratedImage[]>([]);
   // History Images
@@ -43,6 +46,7 @@ export default function App() {
     setSourceImages(base64s);
     setAnalysis(null);
     setCurrentSessionImages([]);
+    setCustomInstruction("");
     
     // Auto analyze
     setIsAnalyzing(true);
@@ -63,6 +67,7 @@ export default function App() {
     setAnalysis(null);
     setCurrentSessionImages([]);
     setIsGenerating(false);
+    setCustomInstruction("");
   };
 
   const startGeneration = async () => {
@@ -88,19 +93,18 @@ export default function App() {
 
     setCurrentSessionImages(placeholders);
 
-    // Generate sequentially with delays to avoid 429 quota limits
+    // Generate sequentially
     for (let i = 0; i < settings.count; i++) {
         const scenario = analysis.scenarios[i % analysis.scenarios.length];
         const currentId = newBatchIds[i];
         
-        // Add artificial delay before starting next request if not the first one
-        // Increased to 6000ms to stay safely within Free Tier limits (approx 15 RPM)
+        // Short delay to avoid race conditions
         if (i > 0) {
-            await new Promise(r => setTimeout(r, 6000)); 
+            await new Promise(r => setTimeout(r, 1000)); 
         }
 
         try {
-            const url = await generateScenarioImage(sourceImages, scenario, settings.ratio);
+            const url = await generateScenarioImage(sourceImages, scenario, settings.ratio, customInstruction);
             
             const updatedImage: GeneratedImage = {
                 ...placeholders[i],
@@ -159,8 +163,7 @@ export default function App() {
                 <div className="aspect-square flex flex-col items-center justify-center bg-gray-100 animate-pulse">
                   <RefreshCw className="w-8 h-8 text-blue-400 animate-spin mb-2" />
                   <span className="text-xs text-gray-500 font-medium px-4 text-center">
-                    Creating Image {idx + 1}...<br/>
-                    <span className="text-[10px] opacity-75">Optimizing for Free Tier</span>
+                    Creating Image {idx + 1}...
                   </span>
                 </div>
             )}
@@ -231,10 +234,7 @@ export default function App() {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-             <div className="hidden sm:flex text-sm text-gray-500 font-medium items-center gap-1">
-               <span className="w-2 h-2 rounded-full bg-green-500"></span>
-               Unlimited Mode
-             </div>
+             {/* Removed Unlimited Mode Badge */}
           </div>
         </div>
       </header>
@@ -330,6 +330,22 @@ export default function App() {
                     </h2>
 
                     <div className="space-y-5">
+                    
+                    {/* Custom Instructions */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+                        <Command size={14} className="text-blue-500" />
+                        Custom Instructions <span className="text-gray-400 font-normal">(Optional)</span>
+                      </label>
+                      <textarea
+                        className="w-full border border-gray-200 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none shadow-sm placeholder:text-gray-400"
+                        rows={3}
+                        placeholder="e.g. Held by an American elderly model, close-up texture shot, placed on a wooden table..."
+                        value={customInstruction}
+                        onChange={(e) => setCustomInstruction(e.target.value)}
+                      />
+                    </div>
+
                     {/* Quantity Slider */}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2 flex justify-between">
