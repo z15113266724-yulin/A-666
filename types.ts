@@ -1,7 +1,9 @@
+
 export interface ProductAnalysis {
   name: string;
   description: string;
   sellingPoints: string[];
+  visualFeatures: string[];
   scenarios: string[];
 }
 

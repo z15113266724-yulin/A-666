@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductAnalysis, AspectRatio } from "../types";
 
@@ -15,19 +16,15 @@ async function callWithRetry<T>(fn: () => Promise<T>, retries = 3, initialDelay 
     } catch (error: any) {
       lastError = error;
       
-      // Extensive check for Rate Limit / Resource Exhausted errors
       const isRateLimit = 
         error?.status === 429 || 
         error?.code === 429 || 
         error?.status === 'RESOURCE_EXHAUSTED' ||
-        (error?.message && error.message.toLowerCase().includes('quota')) ||
-        (error?.message && error.message.toLowerCase().includes('resource_exhausted')) ||
-        (error?.message && error.message.includes('429'));
+        (error?.message && error.message.toLowerCase().includes('quota'));
       
       if (isRateLimit && i < retries - 1) {
-        // Exponential backoff
         const backoff = Math.min(initialDelay * Math.pow(2, i), 10000);
-        console.warn(`Rate limit hit (Attempt ${i+1}/${retries}). Retrying in ${backoff/1000}s...`);
+        console.warn(`Rate limit hit. Retrying in ${backoff/1000}s...`);
         await wait(backoff);
         continue;
       }
@@ -44,19 +41,21 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Produ
   const isMulti = base64Images.length > 1;
   
   const prompt = `
-    Analyze ${isMulti ? 'these product images' : 'this product image'} for an Amazon listing. 
+    作为亚马逊产品视觉专家，请分析这些产品图片。
     
-    TASK:
-    1. Identify the product name/type. ${isMulti ? 'These images represent a SET or COLLECTION of items. Identify them as a cohesive group.' : ''}
-    2. Write a short visual description.
-    3. List 3 key selling points visualizable in a photo.
-    4. Generate exactly 8 distinct photography scenarios suitable for Amazon.
-       - Scenarios MUST be descriptive prompt fragments (e.g., "placed on a modern marble kitchen counter with sunlight").
-       ${isMulti ? 
-         '- IMPORTANT: Since multiple source images are provided, at least 4 scenarios MUST be "Group Shots" or "Knolling Layouts" that display ALL items together comfortably.' : 
-         '- Include: White background studio shot, Lifestyle usage shot, Close-up detail shot.'}
-       - ENSURE scenarios are generic and commercially safe.
-       - STRICTLY FORBIDDEN: Do not suggest scenarios involving specific celebrities, copyrighted characters (Disney, Marvel, etc.), or specific competitor brands.
+    任务：
+    1. 识别产品名称/类型（中文）。${isMulti ? '这是一组产品（套装或系列），请将它们作为一个整体识别。' : ''}
+    2. 用中文写一段简短的视觉描述。
+    3. 列出3个适合在图片中展示的关键卖点（中文）。
+    4. **技术设计规范分析（关键）**：
+       - 列出4-6个具体的产品视觉特征（使用中文专业术语，如“无缝工艺”、“磨砂质感”）。
+       - **重要**：如果产品缺少某些“常见标准特征”，必须明确指出来（例如：“袜子脚后跟无黑色加固块 - 纯色设计”、“瓶身无标签”）。AI生图时将严格遵守这些特征。
+    5. 生成 8 个截然不同的亚马逊产品摄影场景（中文描述）。
+       - **多样性要求**：这 8 个场景必须在构图、光影、背景风格上**完全不同**。不要生成雷同的场景。
+       - 包含：纯白底商业摄影、生活化使用场景、微距特写、创意布景等。
+       ${isMulti ? '- 必须包含至少4个“群像组合”或“Knolling平铺”场景，优雅地展示所有产品。' : ''}
+       - 场景描述要具体，方便作为生图提示词。
+       - **严禁**：不要包含任何具体名人、版权角色（如迪士尼、漫威）或竞争对手品牌Logo。
   `;
 
   const imageParts = base64Images.map(data => ({
@@ -80,9 +79,10 @@ export const analyzeProductImage = async (base64Images: string[]): Promise<Produ
             name: { type: Type.STRING },
             description: { type: Type.STRING },
             sellingPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+            visualFeatures: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Visual design specs in Chinese" },
             scenarios: { type: Type.ARRAY, items: { type: Type.STRING } }
           },
-          required: ["name", "description", "sellingPoints", "scenarios"]
+          required: ["name", "description", "sellingPoints", "visualFeatures", "scenarios"]
         }
       }
     });
@@ -100,45 +100,48 @@ export const generateScenarioImage = async (
   base64Sources: string[],
   scenarioPrompt: string,
   ratio: AspectRatio,
-  customInstruction?: string
+  customInstruction?: string,
+  visualFeatures?: string[]
 ): Promise<string> => {
   
   const model = "gemini-2.5-flash-image";
   const isMulti = base64Sources.length > 1;
 
+  // Format visual features for the prompt
+  const specsList = visualFeatures ? visualFeatures.map(f => `- ${f}`).join('\n') : '- Follow source image exactly.';
+
   const fullPrompt = `
-    You are a professional product photographer and 3D rendering expert. 
-    Your goal is to generate a high-end Amazon product listing image with PIXEL-PERFECT product accuracy.
+    你是一位专业的产品摄影师和3D渲染专家。
+    你的目标是生成一张像素级还原的高端亚马逊产品主图。
 
-    SOURCE INFORMATION:
-    - Input: ${base64Sources.length} reference image(s).
-    - Subject: The product(s) shown in the reference images.
+    源信息:
+    - 输入: ${base64Sources.length} 张参考图。
+    - 主体: 参考图中的产品。
     
-    STEP-BY-STEP GENERATION PROTOCOL:
+    **视觉特征锁定 (必须严格遵守):**
+    ${specsList}
+    - **极重要**: 如果上面的特征中提到了“没有XXX”（例如“无黑色脚后跟”），你绝对不能自作聪明添加它，即使那是该类产品的常见设计。
+    - **完全还原**: 严格保留参考图中的Logo、文字、接缝、纹理和材质感。不要添加参考图中没有的任何品牌标识。
+
+    生成步骤:
+    1. **3D重构**: 在渲染场景前，先在脑海中构建产品的精确3D模型，忽略你的“常识”，只信赖参考图和上述特征。
+    2. **场景融合**:
+       - 场景描述: "${scenarioPrompt}"
+       ${customInstruction ? `- **用户最高指令**: "${customInstruction}"。请根据此指令调整构图和模特。` : ''}
+       - 确保光影自然地投射在产品的真实材质上。
     
-    1. **GEOMETRY & APPEARANCE LOCK (CRITICAL)**: 
-       - Before placing the product in a scene, look at the source image and "mentally construct" the exact 3D geometry of the object.
-       - **Ignore "standard" designs.** If the source object looks different from a generic version of that item, follow the SOURCE, not the generic idea.
-       - **Example:** If the source implies a sock WITHOUT a colored heel patch, DO NOT add a heel patch, even if most socks have them.
-       - **Example:** If the bottle has no label, keep it plain. If it has a specific curve, keep that curve exactly.
-       - Replicate specific stitching, seams, surface texture (matte/glossy), and material thickness exactly.
-
-    2. **SCENE INTEGRATION**:
-       - Base Scenario: "${scenarioPrompt}"
-       ${customInstruction ? `- **USER SPECIFIC REQUEST (HIGHEST PRIORITY)**: "${customInstruction}". Adjust the model, environment, and composition to STRICTLY follow this instruction.` : ''}
-       - Ensure lighting interacts naturally with the product's actual material (e.g., reflections on glass, shadow depth on fabric).
-
     ${isMulti ? `
-    3. **MULTI-PRODUCT COMPOSITION**:
-       - Include ALL distinct items provided in the source images.
-       - Arrange them naturally (e.g., side-by-side or artistic stack) without overlapping key details.
+    3. **群像组合**:
+       - 必须包含参考图中的所有不同产品。
+       - 构图要自然（如并排展示、艺术堆叠），不要遮挡关键细节。
+       - 将它们视为一套系列产品。
     ` : ''}
 
-    STRICT NEGATIVE CONSTRAINTS (DO NOT DO):
-    - DO NOT change the product shape, color, or markings.
-    - DO NOT add logos, text, or brand names that are not in the source image.
-    - DO NOT add "standard features" (like rubber grips, reinforced heels, or extra buttons) if they are absent in the source.
-    - STRICTLY NO copyrighted characters (Disney, Marvel, etc.) or third-party logos.
+    **严格禁止 (负面提示)**:
+    - 禁止改变产品的形状、颜色或原有图案。
+    - 禁止添加参考图中不存在的Logo或文字。
+    - 禁止出现任何版权角色（迪士尼、漫威等）或名人。
+    - 禁止添加参考图中没有的“标准配件”（如额外的扣子、加固块）。
   `;
 
   const imageParts = base64Sources.map(data => ({
